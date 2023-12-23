@@ -93,6 +93,7 @@ dir_rule:
 ## 3. option插件配置项
 ```yml
 # 插件的配置示例
+# 当kwargs的值为字符串类型时，支持使用环境变量，语法为 ${环境变量名}
 plugins:
   after_init:
     - plugin: usage_log # 实时打印硬件占用率的插件
@@ -119,6 +120,11 @@ plugins:
         proxy_client_key: cl_proxy_future # 代理类的client_key
         whitelist: [ api, ] # 白名单，当client.impl匹配白名单时才代理
 
+    - plugin: auto_set_browser_cookies # 自动获取浏览器cookies，详见插件类
+      kwargs:
+        browser: chrome
+        domain: 18comic.vip
+
   after_album:
     - plugin: zip # 压缩文件插件
       kwargs:
@@ -126,5 +132,28 @@ plugins:
         filename_rule: Ptitle # 压缩文件的命名规则
         zip_dir: D:/jmcomic/zip/ # 压缩文件存放的文件夹
         delete_original_file: true # 压缩成功后，删除所有原文件和文件夹
+
+    - plugin: send_qq_email # 发送qq邮件插件
+      kwargs:
+        msg_from: ${EMAIL} # 发件人
+        msg_to: aaa@qq.com # 收件人
+        password: dkjlakdjlkas # 发件人的授权码
+        title: jmcomic # 标题
+        content: jmcomic finished !!! # 内容
+
+  main:
+    - plugin: favorite_folder_export # 导出收藏夹插件
+      log: false
+      kwargs:
+        zip_enable: true # 对收藏夹进行压缩
+        zip_filepath: ${JM_DOWNLOAD_DIR}/export.zip # 压缩文件路径
+        zip_password: ${ZIP_PASSWORD} # 压缩密码
+
+  after_photo:
+    - plugin: j2p # jpg图片合成为一个pdf插件
+      kwargs:
+        pdf_dir: D:/pdf # pdf存放文件夹
+        filename_rule: Pid # pdf命名规则
+        quality: 100 # pdf质量，0 - 100
 
 ```

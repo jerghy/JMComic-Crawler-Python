@@ -1,58 +1,46 @@
 from .jm_option import *
 
-# help for typing
-DownloadIterObjs = Union[
-    JmAlbumDetail,
-    Sequence[JmPhotoDetail],
-    JmPhotoDetail,
-    Sequence[JmImageDetail],
-]
-
-
-class JmDownloadException(Exception):
-    pass
-
 
 # noinspection PyMethodMayBeStatic
 class DownloadCallback:
 
     def before_album(self, album: JmAlbumDetail):
-        jm_debug('album.before',
-                 f'本子获取成功: [{album.id}], '
-                 f'作者: [{album.author}], '
-                 f'章节数: [{len(album)}], '
-                 f'总页数: [{album.page_count}], '
-                 f'标题: [{album.name}], '
-                 f'关键词: [{album.tags}]'
-                 )
+        jm_log('album.before',
+               f'本子获取成功: [{album.id}], '
+               f'作者: [{album.author}], '
+               f'章节数: [{len(album)}], '
+               f'总页数: [{album.page_count}], '
+               f'标题: [{album.name}], '
+               f'关键词: {album.tags}'
+               )
 
     def after_album(self, album: JmAlbumDetail):
-        jm_debug('album.after', f'本子下载完成: [{album.id}]')
+        jm_log('album.after', f'本子下载完成: [{album.id}]')
 
     def before_photo(self, photo: JmPhotoDetail):
-        jm_debug('photo.before',
-                 f'开始下载章节: {photo.id} ({photo.album_id}[{photo.index}/{len(photo.from_album)}]), '
-                 f'标题: [{photo.name}], '
-                 f'图片数为[{len(photo)}]'
-                 )
+        jm_log('photo.before',
+               f'开始下载章节: {photo.id} ({photo.album_id}[{photo.index}/{len(photo.from_album)}]), '
+               f'标题: [{photo.name}], '
+               f'图片数为[{len(photo)}]'
+               )
 
     def after_photo(self, photo: JmPhotoDetail):
-        jm_debug('photo.after',
-                 f'章节下载完成: [{photo.id}] ({photo.album_id}[{photo.index}/{len(photo.from_album)}])')
+        jm_log('photo.after',
+               f'章节下载完成: [{photo.id}] ({photo.album_id}[{photo.index}/{len(photo.from_album)}])')
 
     def before_image(self, image: JmImageDetail, img_save_path):
         if image.is_exists:
-            jm_debug('image.before',
-                     f'图片已存在: {image.tag} ← [{img_save_path}]'
-                     )
+            jm_log('image.before',
+                   f'图片已存在: {image.tag} ← [{img_save_path}]'
+                   )
         else:
-            jm_debug('image.before',
-                     f'图片准备下载: {image.tag}, [{image.img_url}] → [{img_save_path}]'
-                     )
+            jm_log('image.before',
+                   f'图片准备下载: {image.tag}, [{image.img_url}] → [{img_save_path}]'
+                   )
 
     def after_image(self, image: JmImageDetail, img_save_path):
-        jm_debug('image.after',
-                 f'图片下载完成: {image.tag}, [{image.img_url}] → [{img_save_path}]')
+        jm_log('image.after',
+               f'图片下载完成: {image.tag}, [{image.img_url}] → [{img_save_path}]')
 
 
 class JmDownloader(DownloadCallback):
@@ -120,14 +108,14 @@ class JmDownloader(DownloadCallback):
 
     # noinspection PyMethodMayBeStatic
     def execute_by_condition(self,
-                             iter_objs: DownloadIterObjs,
+                             iter_objs: DetailEntity,
                              apply: Callable,
                              count_batch: int,
                              ):
         """
         调度本子/章节的下载
         """
-        iter_objs = self.filter_iter_objs(iter_objs)
+        iter_objs = self.do_filter(iter_objs)
         count_real = len(iter_objs)
 
         if count_real == 0:
@@ -148,17 +136,17 @@ class JmDownloader(DownloadCallback):
             )
 
     # noinspection PyMethodMayBeStatic
-    def filter_iter_objs(self, iter_objs: DownloadIterObjs):
+    def do_filter(self, detail: DetailEntity):
         """
         该方法可用于过滤本子/章节，默认不会做过滤。
         例如:
         只想下载 本子的最新一章，返回 [album[-1]]
         只想下载 章节的前10张图片，返回 [photo[:10]]
 
-        :param iter_objs: 可能是本子或者章节，需要自行使用 isinstance 判断
+        :param detail: 可能是本子或者章节，需要自行使用 isinstance / detail.is_xxx 判断
         :returns: 只想要下载的 本子的章节 或 章节的图片
         """
-        return iter_objs
+        return detail
 
     # noinspection PyUnusedLocal
     def client_for_album(self, jm_album_id) -> JmcomicClient:
@@ -193,6 +181,14 @@ class JmDownloader(DownloadCallback):
             downloader=self,
         )
 
+    def after_photo(self, photo: JmPhotoDetail):
+        super().after_photo(photo)
+        self.option.call_all_plugin(
+            'after_photo',
+            photo=photo,
+            downloader=self,
+        )
+
     def after_image(self, image: JmImageDetail, img_save_path):
         super().after_image(image, img_save_path)
         photo = image.from_photo
@@ -207,6 +203,62 @@ class JmDownloader(DownloadCallback):
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         if exc_type is not None:
-            jm_debug('dler.exception',
-                     f'{self.__class__.__name__} Exit with exception: {exc_type, exc_val}'
-                     )
+            jm_log('dler.exception',
+                   f'{self.__class__.__name__} Exit with exception: {exc_type, exc_val}'
+                   )
+
+    @classmethod
+    def use(cls, *args, **kwargs):
+        """
+        让本类替换JmModuleConfig.CLASS_DOWNLOADER
+        """
+        JmModuleConfig.CLASS_DOWNLOADER = cls
+
+
+class DoNotDownloadImage(JmDownloader):
+    """
+    本类仅用于测试
+
+    用法：
+
+    JmModuleConfig.CLASS_DOWNLOADER = DoNotDownloadImage
+    """
+
+    def download_by_image_detail(self, image: JmImageDetail, client: JmcomicClient):
+        # ensure make dir
+        self.option.decide_image_filepath(image)
+        pass
+
+
+class JustDownloadSpecificCountImage(JmDownloader):
+    from threading import Lock
+
+    count_lock = Lock()
+    count = 0
+
+    def __init__(self, option: JmOption) -> None:
+        super().__init__(option)
+
+    def download_by_image_detail(self, image: JmImageDetail, client: JmcomicClient):
+        # ensure make dir
+        self.option.decide_image_filepath(image)
+
+        if self.try_countdown():
+            return super().download_by_image_detail(image, client)
+
+    def try_countdown(self):
+        if self.count < 0:
+            return False
+
+        with self.count_lock:
+            if self.count < 0:
+                return False
+
+            self.count -= 1
+
+            return self.count >= 0
+
+    @classmethod
+    def use(cls, count):
+        cls.count = count
+        super().use()

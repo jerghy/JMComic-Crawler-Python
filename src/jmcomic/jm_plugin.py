@@ -5,11 +5,19 @@
 from .jm_option import *
 
 
+class PluginValidationException(Exception):
+
+    def __init__(self, plugin: 'JmOptionPlugin', msg: str):
+        self.plugin = plugin
+        self.msg = msg
+
+
 class JmOptionPlugin:
     plugin_key: str
 
     def __init__(self, option: JmOption):
         self.option = option
+        self.log_enable = True
 
     def invoke(self, **kwargs) -> None:
         """
@@ -26,6 +34,38 @@ class JmOptionPlugin:
         """
         return cls(option)
 
+    def log(self, msg, topic=None):
+        if self.log_enable is not True:
+            return
+
+        jm_log(
+            topic=f'plugin.{self.plugin_key}' + (f'.{topic}' if topic is not None else ''),
+            msg=msg
+        )
+
+    def require_true(self, case: Any, msg: str, is_param_validation=True):
+        """
+        独立于ExceptionTool的一套异常抛出体系
+
+
+        :param case: 条件
+        :param msg: 报错信息
+        :param is_param_validation: True 表示 调用本方法是用于校验参数，则会抛出特定异常（PluginValidationException）
+        """
+        if case:
+            return
+
+        if is_param_validation:
+            raise PluginValidationException(self, msg)
+        else:
+            ExceptionTool.raises(msg)
+
+    def warning_lib_not_install(self, lib: str):
+        msg = (f'插件`{self.plugin_key}`依赖库: {lib}，请先安装{lib}再使用。'
+               f'安装命令: [pip install {lib}]')
+        import warnings
+        warnings.warn(msg)
+
 
 class JmLoginPlugin(JmOptionPlugin):
     """
@@ -33,19 +73,22 @@ class JmLoginPlugin(JmOptionPlugin):
     """
     plugin_key = 'login'
 
-    def invoke(self, username, password) -> None:
-        assert isinstance(username, str), '用户名必须是str'
-        assert isinstance(password, str), '密码必须是str'
+    def invoke(self,
+               username: str,
+               password: str,
+               impl=None,
+               ) -> None:
+        self.require_true(username, '用户名不能为空')
+        self.require_true(password, '密码不能为空')
 
-        client = self.option.new_jm_client()
+        client = self.option.new_jm_client(impl=impl)
         client.login(username, password)
-        cookies = client['cookies']
 
-        postman: dict = self.option.client.postman.src_dict
-        meta_data = postman.get('meta_data', {})
-        meta_data['cookies'] = cookies
-        postman['meta_data'] = meta_data
-        jm_debug('plugin.login', '登录成功')
+        cookies = dict(client['cookies'])
+        self.option.update_cookies(cookies)
+        JmModuleConfig.APP_COOKIES = cookies
+
+        self.log('登录成功')
 
 
 class UsageLogPlugin(JmOptionPlugin):
@@ -85,12 +128,7 @@ class UsageLogPlugin(JmOptionPlugin):
         try:
             import psutil
         except ImportError:
-            msg = (f'插件`{self.plugin_key}`依赖psutil库，请先安装psutil再使用。'
-                   f'安装命令: [pip install psutil]')
-            import warnings
-            warnings.warn(msg)
-            # import sys
-            # print(msg, file=sys.stderr)
+            self.warning_lib_not_install('psutil')
             return
 
         from time import sleep
@@ -119,7 +157,7 @@ class UsageLogPlugin(JmOptionPlugin):
             if len(warning_msg_list) != 0:
                 warning_msg_list.insert(0, '硬件占用告警，占用过高可能导致系统卡死！')
                 warning_msg_list.append('')
-                jm_debug('plugin.psutil.warning', '\n'.join(warning_msg_list))
+                self.log('\n'.join(warning_msg_list), topic='warning')
 
         while True:
             # 获取CPU占用率（0~100）
@@ -140,7 +178,7 @@ class UsageLogPlugin(JmOptionPlugin):
                 # f"发送的字节数: {network_bytes_sent}",
                 # f"接收的字节数: {network_bytes_received}",
             ])
-            jm_debug('plugin.psutil.log', msg)
+            self.log(msg, topic='log')
 
             if enable_warning is True:
                 # 警告
@@ -159,11 +197,9 @@ class FindUpdatePlugin(JmOptionPlugin):
     def invoke(self, **kwargs) -> None:
         self.download_album_with_find_update(kwargs or {})
 
-    def download_album_with_find_update(self, dic):
+    def download_album_with_find_update(self, dic: Dict[str, int]):
         from .api import download_album
         from .jm_downloader import JmDownloader
-
-        dic: Dict[str, int]
 
         # 带入漫画id, 章节id(第x章)，寻找该漫画下第x章节後的所有章节Id
         def find_update(album: JmAlbumDetail):
@@ -184,11 +220,12 @@ class FindUpdatePlugin(JmOptionPlugin):
             return photo_ls
 
         class FindUpdateDownloader(JmDownloader):
-            def filter_iter_objs(self, iter_objs):
-                if not isinstance(iter_objs, JmAlbumDetail):
-                    return iter_objs
+            def do_filter(self, detail):
+                if not detail.is_album():
+                    return detail
 
-                return find_update(iter_objs)
+                detail: JmAlbumDetail
+                return find_update(detail)
 
         # 调用下载api，指定option和downloader
         download_album(
@@ -223,26 +260,32 @@ class ZipPlugin(JmOptionPlugin):
         mkdir_if_not_exists(zip_dir)
 
         # 原文件夹 -> zip文件
-        dir_zip_dict = {}
+        dir_zip_dict: Dict[str, Optional[str]] = {}
         photo_dict = downloader.all_downloaded[album]
 
         if level == 'album':
             zip_path = self.get_zip_path(album, None, filename_rule, suffix, zip_dir)
             dir_path = self.zip_album(album, photo_dict, zip_path)
-            dir_zip_dict[dir_path] = zip_path
+            if dir_path is not None:
+                # 要删除这个album文件夹
+                dir_zip_dict[dir_path] = zip_path
+                # 也要删除album下的photo文件夹
+                for d in files_of_dir(dir_path):
+                    dir_zip_dict[d] = None
 
         elif level == 'photo':
             for photo, image_list in photo_dict.items():
                 zip_path = self.get_zip_path(None, photo, filename_rule, suffix, zip_dir)
                 dir_path = self.zip_photo(photo, image_list, zip_path)
-                dir_zip_dict[dir_path] = zip_path
+                if dir_path is not None:
+                    dir_zip_dict[dir_path] = zip_path
 
         else:
             ExceptionTool.raises(f'Not Implemented Zip Level: {level}')
 
         self.after_zip(dir_zip_dict)
 
-    def zip_photo(self, photo, image_list: list, zip_path: str):
+    def zip_photo(self, photo, image_list: list, zip_path: str) -> Optional[str]:
         """
         压缩photo文件夹
         :returns: photo文件夹路径
@@ -251,45 +294,54 @@ class ZipPlugin(JmOptionPlugin):
             if len(image_list) == 0 \
             else os.path.dirname(image_list[0][0])
 
-        all_filepath = set(map(lambda t: t[0], image_list))
+        all_filepath = set(map(lambda t: self.unified_path(t[0]), image_list))
 
-        if len(all_filepath) == 0:
-            jm_debug('plugin.zip.skip', '无下载文件，无需压缩')
-            return
+        return self.do_zip(photo_dir,
+                           zip_path,
+                           all_filepath,
+                           f'压缩章节[{photo.photo_id}]成功 → {zip_path}',
+                           )
 
-        from common import backup_dir_to_zip
-        backup_dir_to_zip(photo_dir, zip_path, acceptor=lambda f: f in all_filepath)
-        jm_debug('plugin.zip.finish', f'压缩章节[{photo.photo_id}]成功 → {zip_path}')
-        return photo_dir
+    @staticmethod
+    def unified_path(f):
+        return fix_filepath(f, os.path.isdir(f))
 
-    def zip_album(self, album, photo_dict: dict, zip_path):
+    def zip_album(self, album, photo_dict: dict, zip_path) -> Optional[str]:
         """
         压缩album文件夹
         :returns: album文件夹路径
         """
-        album_dir = self.option.decide_album_dir(album)
         all_filepath: Set[str] = set()
 
-        for image_list in photo_dict.values():
-            image_list: List[Tuple[str, JmImageDetail]]
-            for path, _ in image_list:
-                all_filepath.add(path)
+        def addpath(f):
+            all_filepath.update(set(f))
 
+        album_dir = self.option.decide_album_dir(album)
+        # addpath(self.option.decide_image_save_dir(photo) for photo in photo_dict.keys())
+        addpath(path for ls in photo_dict.values() for path, _ in ls)
+
+        return self.do_zip(album_dir,
+                           zip_path,
+                           all_filepath,
+                           msg=f'压缩本子[{album.album_id}]成功 → {zip_path}',
+                           )
+
+    def do_zip(self, source_dir, zip_path, all_filepath, msg):
         if len(all_filepath) == 0:
-            jm_debug('plugin.zip.skip', '无下载文件，无需压缩')
-            return
+            self.log('无下载文件，无需压缩', 'skip')
+            return None
 
         from common import backup_dir_to_zip
         backup_dir_to_zip(
-            album_dir,
+            source_dir,
             zip_path,
-            acceptor=lambda f: f in all_filepath
-        )
+            acceptor=lambda f: os.path.isdir(f) or self.unified_path(f) in all_filepath
+        ).close()
 
-        jm_debug('plugin.zip.finish', f'压缩本子[{album.album_id}]成功 → {zip_path}')
-        return album_dir
+        self.log(msg, 'finish')
+        return self.unified_path(source_dir)
 
-    def after_zip(self, dir_zip_dict: Dict[str, str]):
+    def after_zip(self, dir_zip_dict: Dict[str, Optional[str]]):
         # 是否要删除所有原文件
         if self.delete_original_file is True:
             self.delete_all_files_and_empty_dir(
@@ -315,16 +367,21 @@ class ZipPlugin(JmOptionPlugin):
         删除所有文件和文件夹
         """
         import os
-        for album, photo_dict in all_downloaded.items():
-            for photo, image_list in photo_dict.items():
-                for f, image in image_list:
-                    os.remove(f)
-                    jm_debug('plugin.zip.remove', f'删除原文件: {f}')
+        for photo_dict in all_downloaded.values():
+            for image_list in photo_dict.values():
+                for f, _ in image_list:
+                    # check not exist
+                    if file_not_exists(f):
+                        continue
 
-        for d in dir_list:
-            if len(os.listdir(d)) == 0:
-                os.removedirs(d)
-                jm_debug('plugin.zip.remove', f'删除文件夹: {d}')
+                    os.remove(f)
+                    self.log(f'删除原文件: {f}', 'remove')
+
+        for d in sorted(dir_list, reverse=True):
+            # check exist
+            if file_exists(d):
+                os.rmdir(d)
+                self.log(f'删除文件夹: {d}', 'remove')
 
 
 class ClientProxyPlugin(JmOptionPlugin):
@@ -338,7 +395,7 @@ class ClientProxyPlugin(JmOptionPlugin):
         if whitelist is not None:
             whitelist = set(whitelist)
 
-        clazz = JmModuleConfig.client_impl_class(proxy_client_key)
+        proxy_clazz = JmModuleConfig.client_impl_class(proxy_client_key)
         clazz_init_kwargs = kwargs
         new_jm_client = self.option.new_jm_client
 
@@ -347,8 +404,8 @@ class ClientProxyPlugin(JmOptionPlugin):
             if whitelist is not None and client.client_key not in whitelist:
                 return client
 
-            jm_debug('plugin.client_proxy', f'proxy client {client} with {proxy_client_key}')
-            return clazz(client, **clazz_init_kwargs)
+            self.log(f'proxy client {client} with {proxy_clazz}')
+            return proxy_clazz(client, **clazz_init_kwargs)
 
         self.option.new_jm_client = hook_new_jm_client
 
@@ -368,8 +425,7 @@ class ImageSuffixFilterPlugin(JmOptionPlugin):
 
         def apply_filter_then_decide_cache(image: JmImageDetail):
             if image.img_file_suffix not in allowed_suffix_set:
-                jm_debug('image.filter.skip',
-                         f'跳过下载图片: {image.tag}，'
+                self.log(f'跳过下载图片: {image.tag}，'
                          f'因为其后缀\'{image.img_file_suffix}\'不在允许的后缀集合{allowed_suffix_set}内')
                 # hook is_exists True to skip download
                 image.is_exists = True
@@ -379,3 +435,257 @@ class ImageSuffixFilterPlugin(JmOptionPlugin):
             return option_decide_cache(image)
 
         self.option.decide_download_cache = apply_filter_then_decide_cache
+
+
+class SendQQEmailPlugin(JmOptionPlugin):
+    plugin_key = 'send_qq_email'
+
+    def invoke(self,
+               msg_from,
+               msg_to,
+               password,
+               title,
+               content,
+               album=None,
+               downloader=None,
+               ) -> None:
+        self.require_true(msg_from and msg_to and password, '发件人、收件人、授权码都不能为空')
+
+        from common import EmailConfig
+        econfig = EmailConfig(msg_from, msg_to, password)
+        epostman = econfig.create_email_postman()
+        epostman.send(content, title)
+
+        self.log('Email sent successfully')
+
+
+class LogTopicFilterPlugin(JmOptionPlugin):
+    plugin_key = 'log_topic_filter'
+
+    def invoke(self, whitelist) -> None:
+        if whitelist is not None:
+            whitelist = set(whitelist)
+
+        old_jm_log = JmModuleConfig.executor_log
+
+        def new_jm_log(topic, msg):
+            if whitelist is not None and topic not in whitelist:
+                return
+
+            old_jm_log(topic, msg)
+
+        JmModuleConfig.executor_log = new_jm_log
+
+
+class AutoSetBrowserCookiesPlugin(JmOptionPlugin):
+    plugin_key = 'auto_set_browser_cookies'
+
+    accepted_cookies_keys = str_to_set('''
+    yuo1
+    remember_id
+    remember
+    ''')
+
+    def invoke(self,
+               browser: str,
+               domain: str,
+               ) -> None:
+        """
+        坑点预警：由于禁漫需要校验同一设备，使用该插件需要配置自己浏览器的headers，例如
+
+        ```yml
+        client:
+          postman:
+            meta_data:
+              headers: {
+               # 浏览器headers
+              }
+
+        # 插件配置如下：
+        plugins:
+          after_init:
+            - plugin: auto_set_browser_cookies
+              kwargs:
+                browser: chrome
+                domain: 18comic.vip
+        ```
+
+        :param browser: chrome/edge/...
+        :param domain: 18comic.vip/...
+        :return: cookies
+        """
+        cookies, e = get_browser_cookies(browser, domain, safe=True)
+
+        if cookies is None:
+            if isinstance(e, ImportError):
+                self.warning_lib_not_install('browser_cookie3')
+            else:
+                self.log('获取浏览器cookies失败，请关闭浏览器重试')
+            return
+
+        self.option.update_cookies(
+            {k: v for k, v in cookies.items() if k in self.accepted_cookies_keys}
+        )
+        self.log('获取浏览器cookies成功')
+
+
+# noinspection PyMethodMayBeStatic
+class FavoriteFolderExportPlugin(JmOptionPlugin):
+    plugin_key = 'favorite_folder_export'
+
+    # noinspection PyAttributeOutsideInit
+    def invoke(self,
+               save_dir=None,
+               zip_enable=False,
+               zip_filepath=None,
+               zip_password=None,
+               delete_original_file=False,
+               ):
+        self.save_dir = os.path.abspath(save_dir if save_dir is not None else os.getcwd() + '/export/')
+        self.zip_enable = zip_enable
+        self.zip_filepath = os.path.abspath(zip_filepath)
+        self.zip_password = zip_password
+        self.delete_original_file = delete_original_file
+        self.files = []
+
+        mkdir_if_not_exists(self.save_dir)
+        mkdir_if_not_exists(of_dir_path(self.zip_filepath))
+
+        self.main()
+
+    def main(self):
+        cl = self.option.new_jm_client(impl=JmApiClient)
+        # noinspection PyAttributeOutsideInit
+        self.cl = cl
+        page = cl.favorite_folder()
+
+        # 获取所有的收藏夹
+        folders = {fid: fname for fid, fname in page.iter_folder_id_name()}
+        # 加上特殊收藏栏【全部】
+        folders.setdefault('0', '全部')
+
+        # 一个收藏夹一个线程，导出收藏夹数据到文件
+        multi_thread_launcher(
+            iter_objs=folders.items(),
+            apply_each_obj_func=self.handle_folder,
+        )
+
+        if not self.zip_enable:
+            return
+
+        # 压缩导出的文件
+        self.require_true(self.zip_filepath, '如果开启zip，请指定zip_filepath参数（压缩文件保存路径）')
+
+        if self.zip_password is None:
+            self.zip_folder_without_password(self.files, self.zip_filepath)
+        else:
+            self.zip_with_password()
+
+        # 删除导出的原文件
+        if self.delete_original_file is True:
+            for f in self.files:
+                os.remove(f)
+
+    def handle_folder(self, fid: str, fname: str):
+        self.log(f'【收藏夹: {fname}, fid: {fid}】开始获取数据')
+
+        # 获取收藏夹数据
+        page_data = self.fetch_folder_page_data(fid)
+
+        # 序列化到文件
+        filepath = self.save_folder_page_data_to_file(page_data, fid, fname)
+
+        if filepath is None:
+            self.log(f'【收藏夹: {fname}, fid: {fid}】收藏夹无数据')
+            return
+
+        self.log(f'【收藏夹: {fname}, fid: {fid}】保存文件成功 → [{filepath}]')
+        self.files.append(filepath)
+
+    def fetch_folder_page_data(self, fid):
+        # 一页一页获取，不使用并行
+        page_data = list(self.cl.favorite_folder_gen(folder_id=fid))
+        return page_data
+
+    def save_folder_page_data_to_file(self, page_data: List[JmFavoritePage], fid: str, fname: str):
+        from os import path
+        filepath = path.abspath(path.join(self.save_dir, fix_windir_name(f'【{fid}】{fname}.csv')))
+
+        data = []
+        for page in page_data:
+            for aid, extra in page.content:
+                data.append(
+                    (aid, extra.get('author', '') or JmMagicConstants.DEFAULT_AUTHOR, extra['name'])
+                )
+
+        if len(data) == 0:
+            return
+
+        with open(filepath, 'w', encoding='utf-8') as f:
+            f.write('id,author,name\n')
+            for item in data:
+                f.write(','.join(item) + '\n')
+
+        return filepath
+
+    def zip_folder_without_password(self, files, zip_path):
+        """
+        压缩文件夹中的文件并设置密码
+
+        :param files: 要压缩的文件的绝对路径的列表
+        :param zip_path: 压缩文件的保存路径
+        """
+        import zipfile
+
+        with zipfile.ZipFile(zip_path, 'w') as zipf:
+            # 获取文件夹中的文件列表并将其添加到 ZIP 文件中
+            for file in files:
+                zipf.write(file, arcname=of_file_name(file))
+
+    def zip_with_password(self):
+        os.chdir(self.save_dir)
+        cmd = f'7z a "{self.zip_filepath}" "{self.save_dir}" -p{self.zip_password} -mhe=on'
+        self.require_true(
+            0 == os.system(cmd),
+            '加密压缩文件失败'
+        )
+
+
+class ConvertJpgToPdfPlugin(JmOptionPlugin):
+    plugin_key = 'j2p'
+
+    def invoke(self,
+               photo: JmPhotoDetail,
+               pdf_dir=None,
+               filename_rule='Pid',
+               quality=100,
+               **kwargs,
+               ):
+        filename = DirRule.apply_rule_directly(None, photo, filename_rule)
+        photo_dir = self.option.decide_image_save_dir(photo)
+        if pdf_dir is None:
+            pdf_dir = photo_dir
+        else:
+            mkdir_if_not_exists(pdf_dir)
+
+        pdf_filepath = f'{pdf_dir}{filename}.pdf'
+
+        def get_cmd(suffix='.jpg'):
+            return f'magick convert -quality {quality} "{photo_dir}*{suffix}" "{pdf_filepath}"'
+
+        cmd = get_cmd()
+        self.log(f'execute command: {cmd}')
+        code = self.execute_cmd(cmd)
+
+        self.require_true(
+            code == 0,
+            'jpg图片合并为pdf失败！'
+            '请确认你是否安装了magick，安装网站: [http://www.imagemagick.org/]',
+            False,
+        )
+
+        self.log(f'Convert Successfully: JM{photo.id} → {pdf_filepath}')
+
+    # noinspection PyMethodMayBeStatic
+    def execute_cmd(self, cmd):
+        return os.system(cmd)

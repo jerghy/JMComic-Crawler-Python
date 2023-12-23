@@ -57,11 +57,11 @@ class Test_Client(JmTestConfigurable):
             self.assertEqual(old, default_raise_exception_executor)
             raise B()
 
-        JmModuleConfig.raise_exception_executor = default_raise_exception_executor
+        JmModuleConfig.executor_raise_exception = default_raise_exception_executor
         ExceptionTool.replace_old_exception_executor(raises)
         self.assertRaises(B, JmcomicText.parse_to_jm_id, 'asdhasjhkd')
         # 还原
-        JmModuleConfig.raise_exception_executor = default_raise_exception_executor
+        JmModuleConfig.executor_raise_exception = default_raise_exception_executor
 
     def test_detail_property_list(self):
         album = self.client.get_album_detail(410090)
@@ -181,7 +181,7 @@ class Test_Client(JmTestConfigurable):
             try:
                 page = self.client.search_site(**params)
                 print(page)
-                assert int(page[0][0]) == expected_result
+                self.assertEqual(int(page[0][0]), expected_result)
             except Exception as e:
                 elist.append(e)
 
@@ -189,13 +189,13 @@ class Test_Client(JmTestConfigurable):
         cases = {
             152637: {
                 'search_query': '无修正',
-                'order_by': JmSearchAlbumClient.ORDER_BY_LIKE,
-                'time': JmSearchAlbumClient.TIME_ALL,
+                'order_by': JmMagicConstants.ORDER_BY_LIKE,
+                'time': JmMagicConstants.TIME_ALL,
             },
             147643: {
                 'search_query': '无修正',
-                'order_by': JmSearchAlbumClient.ORDER_BY_PICTURE,
-                'time': JmSearchAlbumClient.TIME_ALL,
+                'order_by': JmMagicConstants.ORDER_BY_PICTURE,
+                'time': JmMagicConstants.TIME_ALL,
             },
         }
 
@@ -253,14 +253,79 @@ class Test_Client(JmTestConfigurable):
                 self.assertEqual(ans, id(photo))
 
     def test_search_generator(self):
-        JmModuleConfig.decode_url_when_debug = False
+        JmModuleConfig.flag_decode_url_when_logging = False
 
         gen = self.client.search_gen('MANA')
         for i, page in enumerate(gen):
-            print(page.page_count)
+            print(page.total)
             page = gen.send({
                 'search_query': 'MANA +无修正',
                 'page': 1
             })
-            print(page.page_count)
+            print(page.total)
             break
+
+    def test_cache_level(self):
+        def get(cl):
+            return cl.get_album_detail('123')
+
+        def assertEqual(first_cl, second_cl, msg):
+            return self.assertEqual(
+                get(first_cl),
+                get(second_cl),
+                msg,
+            )
+
+        def assertNotEqual(first_cl, second_cl, msg):
+            return self.assertNotEqual(
+                get(first_cl),
+                get(second_cl),
+                msg,
+            )
+
+        cases = [
+            (
+                CacheRegistry.level_option,
+                CacheRegistry.level_option,
+                CacheRegistry.level_client,
+                CacheRegistry.level_client,
+            ),
+            (
+                True,
+                'level_option',
+                'level_client',
+                CacheRegistry.level_client,
+            )
+        ]
+
+        def run(arg1, arg2, arg3, arg4):
+            op = self.new_option()
+
+            c1 = op.new_jm_client(cache=arg1)
+            c2 = op.new_jm_client(cache=arg2)
+            c3 = op.new_jm_client(cache=arg3)
+            c4 = op.new_jm_client(cache=arg4)
+            c5 = op.new_jm_client(cache=False)
+
+            # c1 == c2
+            # c3 == c4
+            # c1 != c3
+            # c5 != c1, c2, c3, c4
+            invoke_all(
+                args_func_list=[
+                    (None, func) for func in [
+                        lambda: assertEqual(c1, c2, 'equals in same option level'),
+                        lambda: assertNotEqual(c3, c4, 'not equals in client level'),
+                        lambda: assertNotEqual(c1, c3, 'not equals in different level'),
+                        lambda: assertNotEqual(c1, c5, 'not equals for None level'),
+                        lambda: assertNotEqual(c3, c5, 'not equals for None level'),
+                    ]
+                ]
+            )
+
+        future_ls = thread_pool_executor(
+            iter_objs=cases,
+            apply_each_obj_func=run,
+        )
+
+        return [f.result() for f in future_ls]  # 等待执行完毕

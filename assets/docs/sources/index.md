@@ -9,8 +9,8 @@ Python API for JMComic（禁漫天堂）
 
     - GitHub Actions: Requires only a GitHub account. (See
       tutorial → [Tutorial - Download Album via GitHub Actions](./tutorial/1_github_actions.md))
-
-    - Command line: No need to write Python code, simple and easy to use. (See tutorial → [Tutorial - Download Album via Command Line](./tutorial/2_command_line.md))
+    - Command line: No need to write Python code, simple and easy to use. (See
+      tutorial → [Tutorial - Download Album via Command Line](./tutorial/2_command_line.md))
     - Python code: The most flexible and powerful way, requires some basic knowledge of Python programming.
 
 - Supports two client implementations: web-based and mobile-based. Switchable through configuration (mobile-based has
@@ -27,11 +27,11 @@ Python API for JMComic（禁漫天堂）
 
 - Highly extensible:
 
-    - Supports Plugin plugins for easy functionality extension and use of other plugins.
-        - Currently built-in
-          plugins: `login plugin`, `hardware usage monitoring plugin`, `only download new chapters plugin`, `zip compression plugin`.
+    - Supports Plugin for easy functionality extension and use of other plugins.
+    - Currently built-in
+      plugins: `login plugin`, `hardware usage monitoring plugin`, `only download new chapters plugin`, `zip compression plugin`, `image suffix filter plugin` `send qq email plugin` `logging topic filter plugin` `auto set browser cookies plugin`.
     - Supports custom callback functions before and after downloading album/chapter/images.
-    - Supports custom debug logging.
+    - Supports custom logging.
     - Supports custom core
       classes: `Downloader (responsible for scheduling)`, `Option (responsible for configuration)`, `Client (responsible for requests)`, `entity classes`,
       and more.

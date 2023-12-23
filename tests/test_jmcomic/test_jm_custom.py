@@ -27,7 +27,7 @@ class Test_Custom(JmTestConfigurable):
         base_dir: str = workspace()
         dir_rule = DirRule('Bd_Aaname_Ppname', base_dir)
         # noinspection PyTypeChecker
-        save_dir = dir_rule.deside_image_save_dir(
+        save_dir = dir_rule.decide_image_save_dir(
             MyAlbum('1', '0', '0', [], *['0'] * 10),
             MyPhoto('2', *['0'] * 7)
         )
@@ -45,7 +45,7 @@ class Test_Custom(JmTestConfigurable):
 
         self.assertListEqual(
             JmModuleConfig.DOMAIN_API_LIST,
-            self.option.new_jm_client(domain=[], impl=MyClient.client_key).get_domain_list()
+            self.option.new_jm_client(domain_list=[], impl=MyClient.client_key).get_domain_list()
         )
 
     def test_extends_html_client(self):
@@ -55,9 +55,11 @@ class Test_Custom(JmTestConfigurable):
         JmModuleConfig.register_client(MyClient)
 
         html_domain = self.client.get_html_domain()
+        JmModuleConfig.DOMAIN_HTML_LIST = [html_domain]
+
         self.assertListEqual(
-            [html_domain],
-            self.option.new_jm_client(domain=[], impl=MyClient.client_key).get_domain_list()
+            JmModuleConfig.DOMAIN_HTML_LIST,
+            self.option.new_jm_client(domain_list=[], impl=MyClient.client_key).get_domain_list()
         )
 
     def test_client_key_missing(self):
@@ -72,7 +74,7 @@ class Test_Custom(JmTestConfigurable):
         )
 
     def test_custom_client_empty_domain(self):
-        class MyClient(JmcomicClient):
+        class MyClient(AbstractJmClient):
             client_key = 'myclient'
             pass
 
@@ -93,6 +95,6 @@ class Test_Custom(JmTestConfigurable):
         JmModuleConfig.register_client(MyClient)
         self.assertListEqual(
             JmModuleConfig.DOMAIN_API_LIST,
-            self.option.new_jm_client(domain=[], impl=MyClient.client_key).get_domain_list(),
+            self.option.new_jm_client(domain_list=[], impl=MyClient.client_key).get_domain_list(),
             msg='继承client，不配置域名',
         )
