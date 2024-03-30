@@ -5,20 +5,28 @@
 * option有`默认值`，当你使用配置文件来创建option时，你配置文件中的值会覆盖`默认值`。
 
   因此，在配置option时，不需要配置全部的值，只需要配置特定部分即可。
-
 * 你可以使用下面的代码来得到option的默认值，你可以删除其中的大部分配置项，只保留你要覆盖的配置项
+
+* **下面的插件配置，kwargs参数支持引用环境变量，语法为 ${环境变量名}**
 
 ```python
 from jmcomic import JmOption
 JmOption.default().to_file('./option.yml') # 创建默认option，导出为option.yml文件
 ```
 
-## 2. option常用配置项
+## 2. option常规配置项
 
 ```yml
+# 开启jmcomic的日志输入，默认为true
+# 对日志有需求的可进一步参考文档
+log: true
+
 # 配置客户端相关
 client:
-  # impl: 客户端实现类，不配默认是html，表示网页端
+  # impl: 客户端实现类，不配置默认会使用JmModuleConfig.DEFAULT_CLIENT_IMPL
+  # 可配置:
+  #  html - 表示网页端
+  #  api - 表示使用APP端
   impl: html
 
   # domain: 域名配置，默认是 []，表示运行时自动获取域名。
@@ -30,6 +38,10 @@ client:
     - 18comic.vip
     - 18comic.org
 
+  # retry_times: 请求失败重试次数，默认为5
+  retry_times: 5
+
+  # postman: 请求配置
   postman:
     meta_data:
       # proxies: 代理配置，默认是 system，表示使用系统代理。
@@ -74,26 +86,30 @@ download:
 # 文件夹规则配置，决定图片文件存放在你的电脑上的哪个文件夹
 dir_rule:
   # base_dir: 根目录。
+  # 此配置也支持引用环境变量，例如
+  # base_dir: ${JM_DIR}/下载文件夹/
   base_dir: D:/a/b/c/
 
   # rule: 规则dsl。
   # 本项只建议了解编程的朋友定制，实现在这个类: jmcomic.jm_option.DirRule
   # 写法:
   # 1. 以'Bd'开头，表示根目录
-  # 2. 文件夹每增加一层，使用'_'区隔
-  # 3. 文件夹名字表示为 Pxxx/Ayyy，意思是 JmPhotoDetail.xxx / JmAlbumDetail的.yyy。xxx和yyy可以写什么需要看源码。
-  # 下面是示例，表示使用禁漫网站的默认下载方式 [根目录 / 本子id / 章节序号 / 图片文件]
-  # rule: Bd_Aid_Pindex
+  # 2. 文件夹每增加一层，使用 '_' 或者 '/' 区隔
+  # 3. 用Pxxx或者Ayyy指代文件夹名，意思是 JmPhotoDetail.xxx / JmAlbumDetail的.yyy。xxx和yyy可以写什么需要看源码。
+  # 
+  # 下面演示如果要使用禁漫网站的默认下载方式，该怎么写:
+  # 规则: 根目录 / 本子id / 章节序号 / 图片文件
+  # rule: 'Bd  / Aid   / Pindex'
+  # rule: 'Bd_Aid_Pindex'
 
   # 默认规则是: 根目录 / 章节标题 / 图片文件
   rule: Bd_Ptitle
 ```
 
-
 ## 3. option插件配置项
+
 ```yml
 # 插件的配置示例
-# 当kwargs的值为字符串类型时，支持使用环境变量，语法为 ${环境变量名}
 plugins:
   after_init:
     - plugin: usage_log # 实时打印硬件占用率的插件
@@ -109,21 +125,55 @@ plugins:
     - plugin: find_update # 只下载新章插件
       kwargs:
         145504: 290266 # 下载本子145504的章节290266以后的新章
-        
+
     - plugin: image_suffix_filter # 图片后缀过滤器插件，可以控制只下载哪些后缀的图片
       kwargs:
         allowed_orig_suffix: # 后缀列表，表示只想下载以.gif结尾的图片
-          - .gif 
+          - .gif
 
     - plugin: client_proxy # 客户端实现类代理插件，不建议非开发人员使用
       kwargs:
-        proxy_client_key: cl_proxy_future # 代理类的client_key
+        proxy_client_key: photo_concurrent_fetcher_proxy # 代理类的client_key
         whitelist: [ api, ] # 白名单，当client.impl匹配白名单时才代理
 
     - plugin: auto_set_browser_cookies # 自动获取浏览器cookies，详见插件类
       kwargs:
         browser: chrome
         domain: 18comic.vip
+    
+    # v2.5.0 引入的插件
+    # 可以启动一个服务器，可以在浏览器上查看本子
+    # 基于flask框架，需要安装额外库: pip install plugin_jm_server
+    # 源码：https://github.com/hect0x7/plugin-jm-server
+    - plugin: jm_server 
+      kwargs:
+        password: '3333' # 服务器访问密码
+        base_dir: D:/a/b/c/ # 根目录，默认使用dir_rule.base_dir
+        
+        # 下面是高级配置，不配置也可以
+        
+        # run下的参数是flask框架的app对象的run方法参数，详见flask文档
+        run:
+          host: 0.0.0.0 # 默认接收所有ip的请求
+          port: 80 # 服务器端口，默认为80
+          debug: false # 是否开启debug模式，默认为false
+          
+        # 支持重写背景图片，可以使用你喜欢的背景图片作为背景
+        img_overwrite:
+          bg.jpg: D:/浏览器的背景图
+          m_bg.jpeg: D:/移动设备浏览器的背景图
+
+    - plugin: subscribe_album_update # 自动订阅本子并下载、发送邮件通知的插件
+      kwargs:
+        download_if_has_update: true
+        email_notify: # 见下【发送qq邮件插件】
+          msg_from: x
+          msg_to: x
+          password: x
+          title: album update !!!
+          content: album update !!!
+        album_photo_dict:
+          324930: 424507
 
   after_album:
     - plugin: zip # 压缩文件插件

@@ -91,17 +91,17 @@ class DetailEntity(JmBaseEntity, IndexedEntity):
         """
         authoroname = author + oname
 
-        比较好识别的一种本子名称方式
+        个人认为识别度比较高的本子名称，一眼看去就能获取到本子的关键信息
 
-        具体格式: f'【author】{oname}'
+        具体格式: '【author】oname'
 
         示例:
 
-        原本子名：喂我吃吧 老師! [欶瀾漢化組] [BLVEFO9] たべさせて、せんせい! (ブルーアーカイブ) [中國翻譯] [無修正]
+        Pname：喂我吃吧 老師! [欶瀾漢化組] [BLVEFO9] たべさせて、せんせい! (ブルーアーカイブ) [中國翻譯] [無修正]
 
-        authoroname：【BLVEFO9】喂我吃吧 老師!
+        Pauthoroname：【BLVEFO9】喂我吃吧 老師!
 
-        :return: 返回作者名+作品原名，格式为: '【author】{oname}'
+        :return: 返回作者名+本子原始名称，格式为: '【author】oname'
         """
         return f'【{self.author}】{self.oname}'
 
@@ -109,12 +109,16 @@ class DetailEntity(JmBaseEntity, IndexedEntity):
     def idoname(self):
         """
         类似 authoroname
-        :return: '[id] {oname}'
+        
+        :return: '[id] oname'
         """
         return f'[{self.id}] {self.oname}'
 
     def __str__(self):
-        return f'{self.__class__.__name__}({self.id}-{self.title})'
+        return f'{self.__class__.__name__}' \
+               '{' \
+               f'{self.id}: {self.title}'\
+               '}'
 
     @classmethod
     def __alias__(cls):
@@ -185,6 +189,10 @@ class JmImageDetail(JmBaseEntity):
     @property
     def filename_without_suffix(self):
         return self.img_file_name
+
+    @property
+    def filename(self):
+        return self.img_file_name + self.img_file_suffix
 
     @property
     def is_gif(self):
@@ -478,7 +486,7 @@ class JmAlbumDetail(DetailEntity):
 
         return ret
 
-    def create_photo_detail(self, index) -> Tuple[JmPhotoDetail, Tuple]:
+    def create_photo_detail(self, index) -> JmPhotoDetail:
         # 校验参数
         length = len(self.episode_list)
 
@@ -497,10 +505,10 @@ class JmAlbumDetail(DetailEntity):
             from_album=self,
         )
 
-        return photo, (self.episode_list[index])
+        return photo
 
     def getindex(self, item) -> JmPhotoDetail:
-        return self.create_photo_detail(item)[0]
+        return self.create_photo_detail(item)
 
     def __getitem__(self, item) -> Union[JmPhotoDetail, List[JmPhotoDetail]]:
         return super().__getitem__(item)
@@ -524,7 +532,7 @@ class JmPageContent(JmBaseEntity, IndexedEntity):
         """
         content:
         [
-          album_id, {title, tag_list, ...}
+          album_id, {title, tags, ...}
         ]
         :param content: 分页数据
         :param total: 总结果数
@@ -564,11 +572,11 @@ class JmPageContent(JmBaseEntity, IndexedEntity):
 
     def iter_id_title_tag(self) -> Generator[Tuple[str, str, List[str]], None, None]:
         """
-        返回 album_id, album_title, album_tag_list 的迭代器
+        返回 album_id, album_title, album_tags 的迭代器
         """
         for aid, ainfo in self.content:
-            ainfo.setdefault('tag_list', [])
-            yield aid, ainfo['name'], ainfo['tag_list']
+            ainfo.setdefault('tags', [])
+            yield aid, ainfo['name'], ainfo['tags']
 
     # 下面的方法实现方便的元素访问
 
@@ -610,7 +618,7 @@ class JmSearchPage(JmPageContent):
         page = JmSearchPage([(
             album.album_id, {
                 'name': album.name,
-                'tag_list': album.tags,
+                'tags': album.tags,
             }
         )], 1)
         setattr(page, 'album', album)
