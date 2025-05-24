@@ -307,7 +307,7 @@ class ZipPlugin(JmOptionPlugin):
 
         elif level == 'photo':
             for photo, image_list in photo_dict.items():
-                zip_path = self.get_zip_path(None, photo, filename_rule, suffix, zip_dir)
+                zip_path = self.get_zip_path(photo.from_album, photo, filename_rule, suffix, zip_dir)
                 self.zip_photo(photo, image_list, zip_path, path_to_delete)
 
         else:
@@ -319,7 +319,7 @@ class ZipPlugin(JmOptionPlugin):
         return (
             downloader.download_success_dict[album]
             if album is not None  # after_album
-            else downloader.download_success_dict[photo.from_album] # after_photo
+            else downloader.download_success_dict[photo.from_album]  # after_photo
         )
 
     def zip_photo(self, photo, image_list: list, zip_path: str, path_to_delete):
