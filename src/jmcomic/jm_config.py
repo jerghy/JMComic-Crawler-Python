@@ -128,15 +128,14 @@ class JmModuleConfig:
 
     # 移动端API域名
     DOMAIN_API_LIST = shuffled('''
-    www.cdnmhwscc.vip
-    www.cdnplaystation6.club
-    www.cdnplaystation6.org
-    www.cdnuc.vip
-    www.cdn-mspjmapiproxy.xyz
+    www.cdnaspa.vip
+    www.cdnaspa.club
+    www.cdnplaystation6.vip
+    www.cdnplaystation6.cc
     ''')
 
     # 获取最新移动端API域名的地址
-    API_URL_DOMAIN_SERVER = f'{PROT}jmappc01-1308024008.cos.ap-guangzhou.myqcloud.com/server-2024.txt'
+    API_URL_DOMAIN_SERVER = f'{PROT}jmapp03-1308024008.cos.ap-jakarta.myqcloud.com/server-2024.txt'
 
     APP_HEADERS_TEMPLATE = {
         'Accept-Encoding': 'gzip, deflate',
