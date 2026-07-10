@@ -29,7 +29,7 @@ from jmcomic import *
 # 1. 在调用下载api前，通过创建和使用option对象，可以定制化下载行为。
 # 推荐使用配置文件的方式来创建option对象，
 # 你可以配置很多东西，比如代理、cookies、下载规则等等。
-# 配置文件的语法参考: https://jmcomic.readthedocs.io/en/latest/option_file_syntax/
+# 配置文件的语法参考: https://jmcomic.readthedocs.io/zh-cn/latest/option_file_syntax/
 option = create_option_by_file('op.yml')  # 通过配置文件来创建option对象
 
 # 2. 调用下载api，把option作为参数传递 
@@ -228,6 +228,7 @@ page: JmCategoryPage = cl.month_ranking(1)
 page: JmCategoryPage = cl.week_ranking(1)
 
 # 循环获取分页，使用 cl.categories_filter_gen
+# 基础用法：简单的 for 循环
 for page in cl.categories_filter_gen(page=1, # 起始页码
                                      # 下面是分类参数
                                      time=JmMagicConstants.TIME_WEEK,
@@ -236,6 +237,22 @@ for page in cl.categories_filter_gen(page=1, # 起始页码
                                      ):
     for aid, atitle in page:
         print(aid, atitle)
+
+# 高级用法：使用 generator 的 send() 方法在遍历中途动态修改查询条件
+# 注意：必须用 while 循环手动接收 send() 的返回值，避免在 for 循环内调用 send() 跳过分页
+generator = cl.categories_filter_gen(page=1, time=JmMagicConstants.TIME_WEEK)
+try:
+    page = next(generator)  # 预先启动生成器
+    while True:
+        # 打印第一页
+        for aid, atitle in page:
+            print(aid, atitle)
+        
+        # 假设我们只想看前一页，下一页想换一个排序方式
+        # 调用 send 传入包含新参数的 dict 即可覆盖原来的查询条件
+        page = generator.send({"order_by": JmMagicConstants.ORDER_BY_LATEST})
+except StopIteration:
+    pass
 
 ```
 
@@ -281,6 +298,19 @@ for page in html_cl.search_gen(search_query='mana',
     # 打印page内容
     for aid, atitle in page.iter_id_title():
         print(aid, atitle)
+
+# 高级用法：使用 generator 的 send() 方法进行手动翻页或修改查询条件
+generator = html_cl.search_gen('mana')
+try:
+    page = next(generator)
+    while True:
+        for aid, atitle in page.iter_id_title():
+            print(aid, atitle)
+        
+        # 可直接动态传参改变搜索条件，例如下一页换成搜索 'nana'
+        page = generator.send({"search_query": 'nana'})
+except StopIteration:
+    pass
 ```
 
 

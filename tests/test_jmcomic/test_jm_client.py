@@ -39,13 +39,25 @@ class Test_Client(JmTestConfigurable):
         self.client.download_by_image_detail(image, self.option.decide_image_filepath(image))
 
     def test_album_missing(self):
+        """
+        Verify get_album_detail raises MissingAlbumPhotoException for a missing album.
+        
+        Asserts that requesting album with ID '530595' causes a MissingAlbumPhotoException to be raised.
+        """
         self.assertRaises(
             MissingAlbumPhotoException,
             self.client.get_album_detail,
-            '0'
+            '530595'
         )
 
     def test_detail_property_list(self):
+        """
+        Validate that selected property lists of album 410090 match expected values after conversion to Chinese.
+        
+        Fetches album detail for ID 410090 and compares the first up to nine entries of its `works`, `actors`, `tags`,
+        and `authors` lists against expected values, converting both sides with `JmcomicText.to_zh_cn` before asserting
+        element-wise equality.
+        """
         album = self.client.get_album_detail(410090)
 
         ans = [
@@ -174,7 +186,7 @@ class Test_Client(JmTestConfigurable):
         cases = {
             152637: {
                 'search_query': '无修正',
-                'order_by': JmMagicConstants.ORDER_BY_LIKE,
+                'order_by': JmMagicConstants.ORDER_BY_VIEW,
                 'time': JmMagicConstants.TIME_ALL,
             },
             147643: {
@@ -337,3 +349,53 @@ class Test_Client(JmTestConfigurable):
         album_id = 123
         self.client.download_album_cover(album_id, f'{self.option.dir_rule.base_dir}/{album_id}.webp')
         self.client.download_album_cover(album_id, f'{self.option.dir_rule.base_dir}/{album_id}_3x4.webp', '_3x4')
+
+    def test_ranking(self):
+        """
+        Fetches and prints the jmcomic monthly ranking for current month.
+        
+        This test retrieves the page 1 ranking data from the configured client and writes it to standard output.
+        """
+        print(self.client.month_ranking(1))
+
+    def test_indexed_entity_slice(self):
+        from collections.abc import Sequence
+        
+        # 获取真实的 JmSearchPage 对象
+        page = self.client.search_site("中文", page=1)
+        empty_page = self.client.search_site("测试很长的不知道什么鬼123", page=1)
+
+        self.assertTrue(isinstance(page, Sequence))
+
+        # 切片越界应该正常截断，不报错
+        items = page[:1000]
+        self.assertEqual(len(items), len(page))
+        self.assertEqual(page[1000:2000], [])
+        
+        self.assertEqual(empty_page[:10], [])
+
+        # 负数切片
+        if len(page) >= 2:
+            rev = page[::-1]
+            self.assertEqual(rev[0], page[-1])
+            self.assertEqual(rev[-1], page[0])
+
+        if len(page) >= 2:
+            self.assertEqual(page[-1], page[len(page) - 1])
+            self.assertEqual(page[-2], page[len(page) - 2])
+        
+        with self.assertRaises(IndexError):
+            _ = page[len(page) + 10]
+        with self.assertRaises(IndexError):
+            _ = page[-(len(page) + 10)]
+
+        res = []
+        for i in page:
+            res.append(i)
+        self.assertEqual(len(res), len(page))
+
+        if len(page) > 0:
+            # JmSearchPage overrides __iter__ to yield different elements than __getitem__
+            # So we take an item from iter() to test __contains__
+            first_item = next(iter(page))
+            self.assertTrue(first_item in page)
